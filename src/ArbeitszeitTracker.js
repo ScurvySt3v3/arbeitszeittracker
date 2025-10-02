@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Download, Upload, Plus, Trash2, Settings, Play, Square, Edit2, Check, X } from 'lucide-react';
+import { api } from './api';
 
 const ArbeitszeitTracker = () => {
   const [entries, setEntries] = useState([]);
@@ -10,6 +11,9 @@ const ArbeitszeitTracker = () => {
 
   // Hilfsfunktionen für Zeitkonvertierung
   const dezimalToHHMM = (dezimal) => {
+    if (dezimal === null || dezimal === undefined || isNaN(dezimal)) {
+      return '00:00';
+    }
     const stunden = Math.floor(Math.abs(dezimal));
     const minuten = Math.round((Math.abs(dezimal) - stunden) * 60);
     return `${stunden.toString().padStart(2, '0')}:${minuten.toString().padStart(2, '0')}`;
@@ -69,69 +73,92 @@ const ArbeitszeitTracker = () => {
   };
 
   // Funktion zum Speichern des bearbeiteten Eintrags
-  const saveEditedEntry = () => {
+  const saveEditedEntry = async () => {
     if (!editingEntry) return;
 
-    const arbeitszeit = berechneArbeitszeit(editingEntry.start, editingEntry.ende);
-    const autoUeberstunden = parseFloat(arbeitszeit.dezimal) - sollStunden;
-    
-    let extraStundenDezimal = 0;
-    if (editingEntry.extraStunden && editingEntry.extraStunden !== '00:00') {
-      extraStundenDezimal = hhmmToDezimal(editingEntry.extraStunden);
-      if (!editingEntry.extraPositiv) {
-        extraStundenDezimal = -extraStundenDezimal;
+    try {
+      const arbeitszeit = berechneArbeitszeit(editingEntry.start, editingEntry.ende);
+      const autoUeberstunden = parseFloat(arbeitszeit.dezimal) - sollStunden;
+      
+      let extraStundenDezimal = 0;
+      if (editingEntry.extraStunden && editingEntry.extraStunden !== '00:00') {
+        extraStundenDezimal = hhmmToDezimal(editingEntry.extraStunden);
+        if (!editingEntry.extraPositiv) {
+          extraStundenDezimal = -extraStundenDezimal;
+        }
       }
+
+      const updatedEntry = {
+        ...editingEntry,
+        ...arbeitszeit,
+        extraStunden: editingEntry.extraStunden || '00:00',
+        extraPositiv: editingEntry.extraPositiv !== undefined ? editingEntry.extraPositiv : true,
+        ueberstunden: (autoUeberstunden + extraStundenDezimal).toFixed(2)
+      };
+
+      const savedEntry = await api.updateEntry(updatedEntry);
+      // Bestehende Einträge aktualisieren und nach Datum sortieren
+      setEntries(prev => prev.map(e => 
+        e.id === savedEntry.id ? savedEntry : e
+      ).sort((a, b) => new Date(b.datum) - new Date(a.datum)));
+
+      setEditingEntry(null);
+    } catch (err) {
+      alert('Fehler beim Aktualisieren des Eintrags: ' + err.message);
     }
-
-    const updatedEntry = {
-      ...editingEntry,
-      ...arbeitszeit,
-      extraStunden: editingEntry.extraStunden,
-      extraPositiv: editingEntry.extraPositiv,
-      ueberstunden: (autoUeberstunden + extraStundenDezimal).toFixed(2)
-    };
-
-    if (!editingEntry.extraStunden || editingEntry.extraStunden === '00:00') {
-      delete updatedEntry.extraStunden;
-      delete updatedEntry.extraPositiv;
-    }
-
-    setEntries(entries.map(e => 
-      e.id === updatedEntry.id ? updatedEntry : e
-    ).sort((a, b) => new Date(b.datum) - new Date(a.datum)));
-
-    setEditingEntry(null);
   };
 
+  // Lade Daten beim Start
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   useEffect(() => {
-    const saved = localStorage.getItem('arbeitszeitEntries');
-    const savedSoll = localStorage.getItem('sollStunden');
-    const savedTracking = localStorage.getItem('isTracking');
-    const savedTrackingStart = localStorage.getItem('trackingStart');
-    const savedUeberstundenStartSaldo = localStorage.getItem('ueberstundenStartSaldo');
-    
-    if (saved) setEntries(JSON.parse(saved).map(entry => ({...entry})));
-    if (savedSoll) setSollStunden(parseFloat(savedSoll));
-    if (savedUeberstundenStartSaldo) setUeberstundenStartSaldo(parseFloat(savedUeberstundenStartSaldo));
-    if (savedTracking === 'true' && savedTrackingStart) {
-      setIsTracking(true);
-      setTrackingStart(savedTrackingStart);
-    }
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Lade Einstellungen
+        const settings = await api.getSettings();
+        setSollStunden(settings.soll_stunden);
+        setUeberstundenStartSaldo(settings.ueberstunden_start_saldo);
+
+        // Lade Einträge
+        const loadedEntries = await api.getEntries();
+        setEntries(loadedEntries);
+
+        // Lade Tracking-Status aus localStorage (bleibt lokal)
+        const savedTracking = localStorage.getItem('isTracking');
+        const savedTrackingStart = localStorage.getItem('trackingStart');
+        if (savedTracking === 'true' && savedTrackingStart) {
+          setIsTracking(true);
+          setTrackingStart(savedTrackingStart);
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
 
+  // Aktualisiere Einstellungen auf dem Server
   useEffect(() => {
-    if (entries && entries.length > 0) {
-      localStorage.setItem('arbeitszeitEntries', JSON.stringify(entries));
-    }
-  }, [entries]);
+    const updateSettings = async () => {
+      try {
+        await api.updateSettings({
+          soll_stunden: sollStunden,
+          ueberstunden_start_saldo: ueberstundenStartSaldo
+        });
+      } catch (err) {
+        console.error('Fehler beim Speichern der Einstellungen:', err);
+      }
+    };
 
-  useEffect(() => {
-    localStorage.setItem('sollStunden', sollStunden.toString());
-  }, [sollStunden]);
-
-  useEffect(() => {
-    localStorage.setItem('ueberstundenStartSaldo', ueberstundenStartSaldo.toString());
-  }, [ueberstundenStartSaldo]);
+    updateSettings();
+  }, [sollStunden, ueberstundenStartSaldo]);
 
 
   useEffect(() => {
@@ -154,28 +181,43 @@ const ArbeitszeitTracker = () => {
   }, [isTracking]);
 
   const berechneArbeitszeit = (start, ende) => {
+    if (!start || !ende) {
+      throw new Error('Start- und Endzeit müssen angegeben werden');
+    }
+
     const [startH, startM] = start.split(':').map(Number);
     const [endeH, endeM] = ende.split(':').map(Number);
+
+    if (isNaN(startH) || isNaN(startM) || isNaN(endeH) || isNaN(endeM) ||
+        startH < 0 || startH > 23 || startM < 0 || startM > 59 ||
+        endeH < 0 || endeH > 23 || endeM < 0 || endeM > 59) {
+      throw new Error('Ungültiges Zeitformat oder Werte außerhalb des gültigen Bereichs');
+    }
     
-    const startMinuten = startH * 60 + startM;
-    const endeMinuten = endeH * 60 + endeM;
+    let startMinuten = startH * 60 + startM;
+    let endeMinuten = endeH * 60 + endeM;
+
+    // Wenn die Endzeit vor der Startzeit liegt, addiere 24 Stunden (für Übernacht-Arbeitszeiten)
+    if (endeMinuten < startMinuten) {
+      endeMinuten += 24 * 60;
+    }
+    
     const bruttoMinuten = endeMinuten - startMinuten;
-    
-    const bruttoStunden = bruttoMinuten / 60;
+    const bruttoStunden = Math.round(bruttoMinuten) / 60; // Runden auf volle Minuten
     let pause = 0;
     
     if (bruttoStunden >= 9) {
-      pause = 45;
+      pause = 45; // 30 + 15 Minuten Pause
     } else if (bruttoStunden >= 6) {
-      pause = 30;
+      pause = 30; // 30 Minuten Pause
     }
     
-    const nettoMinuten = bruttoMinuten - pause;
-    const stunden = Math.floor(nettoMinuten / 60);
-    const minuten = nettoMinuten % 60;
+    const nettoMinuten = Math.round(bruttoMinuten - pause); // Runden auf volle Minuten
+    const stunden = Math.floor(Math.abs(nettoMinuten) / 60);
+    const minuten = Math.abs(nettoMinuten) % 60;
     
     return {
-      netto: `${stunden}:${minuten.toString().padStart(2, '0')}`,
+      netto: `${stunden.toString().padStart(2, '0')}:${minuten.toString().padStart(2, '0')}`, // Beide Werte mit Nullen auffüllen
       dezimal: (nettoMinuten / 60).toFixed(2),
       pause,
       brutto: bruttoStunden.toFixed(2)
@@ -289,60 +331,121 @@ const ArbeitszeitTracker = () => {
     setCustomStartTime('');
   };
 
-  const stopTracking = () => {
-    if (!trackingStart) return;
+  const stopTracking = async () => {
+    if (!trackingStart) {
+      alert('Keine Startzeit vorhanden.');
+      return;
+    }
 
-    const now = new Date();
-    const endeTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    
-    const arbeitszeit = berechneArbeitszeit(trackingStart, endeTime);
-    const ueberstunden = parseFloat(arbeitszeit.dezimal) - sollStunden;
-    
-    const entry = {
-      id: Date.now(),
-      datum: now.toISOString().split('T')[0],
-      start: trackingStart,
-      ende: endeTime,
-      ...arbeitszeit,
-      extraStunden: 0,
-      ueberstunden: ueberstunden.toFixed(2)
-    };
-    
-    setEntries([entry, ...entries].sort((a, b) => new Date(b.datum) - new Date(a.datum)));
-    setIsTracking(false);
-    setTrackingStart(null);
+    try {
+      const now = new Date();
+      const endeTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      
+      const arbeitszeit = berechneArbeitszeit(trackingStart, endeTime);
+      const ueberstunden = parseFloat(arbeitszeit.dezimal) - sollStunden;
+      
+      const newEntry = {
+        datum: now.toISOString().split('T')[0],
+        start: trackingStart,
+        ende: endeTime,
+        pause: arbeitszeit.pause,
+        netto: arbeitszeit.netto,
+        dezimal: arbeitszeit.dezimal,
+        brutto: arbeitszeit.brutto,
+        extraStunden: '00:00',
+        extraPositiv: true,
+        ueberstunden: ueberstunden.toFixed(2)
+      };
+      
+      console.log('Stopping tracking with entry:', newEntry);
+      
+      const createdEntry = await api.createEntry(newEntry);
+      // Neuen Eintrag zur Liste hinzufügen und nach Datum sortieren
+      setEntries(prev => [createdEntry, ...prev].sort((a, b) => new Date(b.datum) - new Date(a.datum)));
+      setIsTracking(false);
+      setTrackingStart(null);
+    } catch (err) {
+      alert('Fehler beim Speichern des Eintrags: ' + err.message);
+    }
   };
 
-  const addEntry = () => {
-    if (!newEntry.datum || !newEntry.start || !newEntry.ende) return;
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const addEntry = async () => {
+      // Validiere die Eingaben
+      if (!newEntry.datum || !newEntry.start || !newEntry.ende) {
+        alert('Bitte füllen Sie alle Felder aus.');
+        return;
+      }
+
+      if (isSubmitting) {
+        return;
+      }
+      
+      // Validiere das Zeitformat
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(newEntry.start) || !timeRegex.test(newEntry.ende)) {
+      alert('Bitte geben Sie gültige Uhrzeiten ein (HH:MM).');
+      return;
+    }
     
-    const arbeitszeit = berechneArbeitszeit(newEntry.start, newEntry.ende);
-    const ueberstunden = parseFloat(arbeitszeit.dezimal) - sollStunden;
-    
-    const entry = {
-      id: Date.now(),
-      ...newEntry,
-      ...arbeitszeit,
-      extraStunden: 0,
-      ueberstunden: ueberstunden.toFixed(2)
-    };
-    
-    setEntries([...entries, entry].sort((a, b) => new Date(b.datum) - new Date(a.datum)));
-    setNewEntry({
-      datum: new Date().toISOString().split('T')[0],
-      start: '09:00',
-      ende: '17:00'
-    });
+    setIsSubmitting(true);
+    try {
+      const arbeitszeit = berechneArbeitszeit(newEntry.start, newEntry.ende);
+      if (!arbeitszeit || !arbeitszeit.dezimal) {
+        throw new Error('Fehler bei der Arbeitszeitberechnung');
+      }
+      const ueberstunden = (parseFloat(arbeitszeit.dezimal) - parseFloat(sollStunden)).toFixed(2);
+      
+      const entry = {
+        ...newEntry,
+        pause: arbeitszeit.pause,
+        netto: arbeitszeit.netto,
+        dezimal: arbeitszeit.dezimal,
+        brutto: arbeitszeit.brutto,
+        extraStunden: '00:00',
+        extraPositiv: true,
+        ueberstunden: ueberstunden
+      };
+      
+      console.log('Sending entry:', entry);
+      
+      const createdEntry = await api.createEntry(entry);
+      // Neuen Eintrag zur Liste hinzufügen und nach Datum sortieren
+      setEntries(prev => [createdEntry, ...prev].sort((a, b) => new Date(b.datum) - new Date(a.datum)));
+      setNewEntry({
+        datum: new Date().toISOString().split('T')[0],
+        start: '09:00',
+        ende: '17:00'
+      });
+    } catch (err) {
+      console.error('Error creating entry:', err);
+      alert('Fehler beim Hinzufügen des Eintrags: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const deleteEntry = (id) => {
-    setEntries(entries.filter(e => e.id !== id));
+  const deleteEntry = async (id) => {
+    try {
+      await api.deleteEntry(id);
+      // Eintrag aus der Liste entfernen
+      setEntries(prev => prev.filter(e => e.id !== id));
+    } catch (err) {
+      alert('Fehler beim Löschen des Eintrags: ' + err.message);
+    }
   };
 
 
-  const ueberstundenAusEintraegen = entries.reduce((sum, e) => sum + parseFloat(e.ueberstunden), 0);
-  const gesamtUeberstundenAusEintraegen = ueberstundenStartSaldo + ueberstundenAusEintraegen;
-  const gesamtStunden = entries.reduce((sum, e) => sum + parseFloat(e.dezimal), 0);
+  const ueberstundenAusEintraegen = entries.reduce((sum, e) => {
+    const ueberstunden = parseFloat(e.ueberstunden);
+    return sum + (isNaN(ueberstunden) ? 0 : ueberstunden);
+  }, 0);
+  const gesamtUeberstundenAusEintraegen = parseFloat(ueberstundenStartSaldo) + ueberstundenAusEintraegen;
+  const gesamtStunden = entries.reduce((sum, e) => {
+    const dezimal = parseFloat(e.dezimal);
+    return sum + (isNaN(dezimal) ? 0 : dezimal);
+  }, 0);
   const liveStatus = berechneLiveStatus();
 
   const exportBackup = () => {
@@ -410,7 +513,26 @@ const ArbeitszeitTracker = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-6xl mx-auto">
-        <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
+        {error ? (
+          <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
+            <div className="text-red-600 text-center">
+              <h2 className="text-xl font-bold mb-2">Fehler beim Laden der Daten</h2>
+              <p>{error}</p>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="mt-4 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+                Neu laden
+              </button>
+            </div>
+          </div>
+        ) : isLoading ? (
+          <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
+            <div className="flex justify-center items-center h-40">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600"></div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <Clock className="w-8 h-8 text-indigo-600" />
@@ -550,7 +672,7 @@ const ArbeitszeitTracker = () => {
                           <div>
                             <div className="text-sm text-gray-300 mb-1">Regulärer Feierabend:</div>
                             <div className="text-xl font-bold">{berechneFeierabendZeit(customStartTime, 8)}</div>
-                            <div className="text-xs text-gray-400">(8h Arbeit + 30min Pause)</div>
+                            <div className="text-xs text-gray-400">(8:00 Stunden + 30 Minuten Pause)</div>
                           </div>
                           {gesamtUeberstundenAusEintraegen !== 0 && (
                             <div>
@@ -559,7 +681,7 @@ const ArbeitszeitTracker = () => {
                                 {berechneFeierabendZeit(customStartTime, 8 - gesamtUeberstundenAusEintraegen)}
                               </div>
                               <div className="text-xs text-gray-400">
-                                ({8 - gesamtUeberstundenAusEintraegen}h Arbeit 
+                                ({dezimalToHHMM(8 - gesamtUeberstundenAusEintraegen)} Stunden
                                 {8 - gesamtUeberstundenAusEintraegen > 6 ? ' + Pause' : ''}
                                 {gesamtUeberstundenAusEintraegen >= 0 ? ' durch ' + dezimalToHHMM(Math.abs(gesamtUeberstundenAusEintraegen)) + 'h Überstundenausgleich' : ''})
                               </div>
@@ -620,9 +742,9 @@ const ArbeitszeitTracker = () => {
 
                 <div className="bg-white bg-opacity-20 p-4 rounded-lg backdrop-blur mb-4">
                   <div className="text-sm opacity-90 mb-1">Überstunden gesamt (live)</div>
-                  <div className={`text-4xl font-bold font-mono ${(gesamtUeberstundenAusEintraegen + (liveStatus?.ueberstunden || 0)) >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-                    {(gesamtUeberstundenAusEintraegen + (liveStatus?.ueberstunden || 0)) >= 0 ? '+' : '-'}
-                    {dezimalToHHMM(Math.abs(gesamtUeberstundenAusEintraegen + (liveStatus?.ueberstunden || 0)))}
+                  <div className={`text-4xl font-bold font-mono ${(parseFloat(gesamtUeberstundenAusEintraegen) + (liveStatus?.ueberstunden || 0)) >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                    {(parseFloat(gesamtUeberstundenAusEintraegen) + (liveStatus?.ueberstunden || 0)) >= 0 ? '+' : '-'}
+                    {dezimalToHHMM(Math.abs(parseFloat(gesamtUeberstundenAusEintraegen) + (parseFloat(liveStatus?.ueberstunden) || 0)))}
                   </div>
                   <div className="text-xs opacity-75 mt-2 space-y-1">
                     <div>Startsaldo: {ueberstundenStartSaldo >= 0 ? '+' : '-'}{dezimalToHHMM(Math.abs(ueberstundenStartSaldo))}</div>
@@ -705,10 +827,15 @@ const ArbeitszeitTracker = () => {
               <div className="flex items-end">
                 <button
                   onClick={addEntry}
-                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2"
+                  disabled={isSubmitting}
+                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Plus className="w-5 h-5" />
-                  Hinzufügen
+                  {isSubmitting ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                  ) : (
+                    <Plus className="w-5 h-5" />
+                  )}
+                  {isSubmitting ? 'Wird gespeichert...' : 'Hinzufügen'}
                 </button>
               </div>
             </div>
@@ -889,6 +1016,7 @@ const ArbeitszeitTracker = () => {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
