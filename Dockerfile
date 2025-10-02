@@ -9,11 +9,19 @@ RUN npm run build
 # Production stage with PHP support
 FROM php:8.1-fpm-alpine
 
-# Install nginx and SQLite
+# Install nginx and SQLite runtime
 RUN apk add --no-cache nginx sqlite
 
-# Enable SQLite extension
-RUN docker-php-ext-install pdo pdo_sqlite
+# Install build dependencies temporarily and compile SQLite extension
+RUN apk add --no-cache --virtual .build-deps \
+    sqlite-dev \
+    pkgconfig \
+    autoconf \
+    gcc \
+    g++ \
+    make && \
+    docker-php-ext-install pdo pdo_sqlite && \
+    apk del .build-deps
 
 # Copy built frontend
 COPY --from=build /app/build /var/www/html
