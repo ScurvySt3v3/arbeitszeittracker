@@ -6,4 +6,12 @@ services:
     container_name: arbeitszeittracker
     ports:
       - "8080:80"
+    volumes:
+      - arbeitszeittracker-db:/var/www/html/api/db
+    environment:
+      - PHP_FPM_USER=www-data
+      - PHP_FPM_GROUP=www-data
     restart: unless-stopped
+
+volumes:
+  arbeitszeittracker-db:

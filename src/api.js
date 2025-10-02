@@ -1,4 +1,15 @@
-const API_BASE_URL = 'http://localhost:8000';
+// Automatische API-URL-Erkennung basierend auf Umgebung
+const getApiBaseUrl = () => {
+    if (process.env.NODE_ENV === 'production') {
+        // In Produktion: Relative URL verwenden
+        return '/api';
+    } else {
+        // In Entwicklung: PHP-Server auf Port 8000
+        return 'http://localhost:8000';
+    }
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const api = {
     // Einträge

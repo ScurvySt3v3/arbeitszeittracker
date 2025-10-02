@@ -8,7 +8,17 @@ define('DB_PATH', __DIR__ . '/db/arbeitszeittracker.db');
 define('DB_DIR', __DIR__ . '/db');
 
 // CORS-Einstellungen
-header('Access-Control-Allow-Origin: http://localhost:3000');
+$allowedOrigins = [
+    'http://localhost:3000',    // Development
+    'http://localhost:8080',    // Docker
+    '*'                         // Production fallback
+];
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+if (in_array($origin, $allowedOrigins) || $allowedOrigins[2] === '*') {
+    header('Access-Control-Allow-Origin: ' . $origin);
+}
+
 header('Access-Control-Allow-Credentials: true');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');

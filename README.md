@@ -174,30 +174,47 @@ npm run build
 
 ### 2. Docker Deployment
 
-1. Mit Docker Build:
+1. **Mit Docker Compose (empfohlen):**
    ```bash
-   # Container bauen
-   docker build -t arbeitszeittracker .
-
+   # Repository klonen
+   git clone https://github.com/ScurvySt3v3/arbeitszeittracker.git
+   cd arbeitszeittracker
+   
    # Container starten
-   docker run -d -p 8080:80 arbeitszeittracker
+   docker-compose up -d --build
    ```
 
-2. Mit Docker Compose:
+2. **Mit Docker Build:**
    ```bash
-   # Container bauen und starten
-   docker-compose up -d
+   # Image erstellen
+   docker build -t arbeitszeittracker .
+   
+   # Container mit Volume für Datenbank starten
+   docker run -d \
+     --name arbeitszeittracker \
+     -p 8080:80 \
+     -v arbeitszeittracker-db:/var/www/html/api/db \
+     arbeitszeittracker
    ```
 
-Die Anwendung ist dann unter `http://localhost:8080` (oder Ihrer konfigurierten Domain) erreichbar.
+Die Anwendung ist dann unter `http://localhost:8080` erreichbar und enthält:
+- **Frontend**: React-Anwendung
+- **Backend**: PHP API mit SQLite-Datenbank
+- **Persistente Daten**: Über Docker Volume gespeichert
 
 ## Docker-Konfiguration
 
-Das Projekt enthält folgende Docker-Dateien:
+Das Projekt enthält eine vollständige Docker-Konfiguration für Frontend und Backend:
 
-- `Dockerfile`: Multi-Stage Build für optimierte Image-Größe
-- `nginx.conf`: Optimierte Webserver-Konfiguration
-- `docker-compose.yml`: Einfache Container-Orchestrierung
+- `Dockerfile`: Multi-Stage Build mit PHP 8.1 und Nginx
+- `nginx.conf`: Konfiguration für React-App und PHP-API
+- `docker-compose.yml`: Container-Orchestrierung mit Volume
+- `start.sh`: Startup-Skript für PHP-FPM und Nginx
+
+### Enthaltene Services
+- **Nginx**: Webserver für Frontend und API-Routing
+- **PHP 8.1-FPM**: Backend für API-Endpunkte
+- **SQLite**: Datenbank (persistente Speicherung über Volume)
 
 ### Docker Compose Konfiguration
 ```yaml
@@ -208,8 +225,18 @@ services:
     container_name: arbeitszeittracker
     ports:
       - "8080:80"
+    volumes:
+      - arbeitszeittracker-db:/var/www/html/api/db
     restart: unless-stopped
+
+volumes:
+  arbeitszeittracker-db:
 ```
+
+### Wichtige Features
+- **Automatische API-URL-Erkennung**: Entwicklung vs. Produktion
+- **Persistente Datenbank**: SQLite-Daten bleiben nach Container-Neustart erhalten
+- **Single-Container**: Alles in einem Container für einfaches Deployment
 
 ## Technischer Stack
 
