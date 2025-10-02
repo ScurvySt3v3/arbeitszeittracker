@@ -2,6 +2,13 @@
 
 Eine React- und PHP-basierte Webanwendung zur Zeiterfassung und Überstundenverwaltung.
 
+## 🌟 Aktuelle Version
+
+- **Beta Branch**: Vollständige Anwendung mit PHP/SQLite Backend *(empfohlen)*
+- **Main Branch**: Nur Frontend mit localStorage *(legacy)*
+
+> **Hinweis**: Für die vollständige Funktionalität mit persistenter Datenspeicherung nutzen Sie den `beta` Branch.
+
 ## Features
 
 - 🕒 Live-Zeiterfassung
@@ -176,8 +183,8 @@ npm run build
 
 1. **Mit Docker Compose (empfohlen):**
    ```bash
-   # Repository klonen
-   git clone https://github.com/ScurvySt3v3/arbeitszeittracker.git
+   # Repository klonen (Beta Branch mit PHP Backend)
+   git clone -b beta https://github.com/ScurvySt3v3/arbeitszeittracker.git
    cd arbeitszeittracker
    
    # Container starten
